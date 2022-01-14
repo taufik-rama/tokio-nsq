@@ -895,8 +895,6 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
     };
 
     loop {
-        let now = Instant::now();
-
         match run_connection(&mut state).await {
             Err(generic) => {
                 state.shared.healthy.store(false, Ordering::SeqCst);
@@ -941,18 +939,17 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
             warn!("drained {} messages", drained);
         }
 
-        if now.elapsed() >= state.config.shared.backoff_healthy_after {
-            info!("run_connection_supervisor resetting backoff");
+        if let Some(sleep_for) = backoff.next_backoff() {
+            info!(
+                "run_connection_supervisor sleeping for: {}",
+                sleep_for.as_secs()
+            );
+            tokio::time::sleep(sleep_for).await;
 
+        } else {
+            info!("run_connection_supervisor resetting backoff");
             backoff.reset();
         }
-
-        let sleep_for = backoff.next_backoff().unwrap();
-        info!(
-            "run_connection_supervisor sleeping for: {}",
-            sleep_for.as_secs()
-        );
-        tokio::time::sleep(sleep_for).await;
     }
 }
 
