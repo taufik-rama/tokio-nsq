@@ -12,7 +12,6 @@ use ::std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use ::std::sync::Arc;
 use ::std::task::Poll;
 use ::std::time::Duration;
-use ::std::time::Instant;
 use ::thiserror::Error;
 use ::tokio::io::AsyncRead;
 use ::tokio::io::AsyncReadExt;
@@ -945,7 +944,6 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
                 sleep_for.as_secs()
             );
             tokio::time::sleep(sleep_for).await;
-
         } else {
             info!("run_connection_supervisor resetting backoff");
             backoff.reset();
