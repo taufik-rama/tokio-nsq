@@ -142,8 +142,7 @@ impl NSQMessage {
     /// Sends a message acknowledgement to NSQ.
     pub async fn finish(mut self) {
         if self.context.healthy.load(Ordering::SeqCst) {
-            let _ = self
-                .context
+            self.context
                 .to_connection_tx_ref
                 .send(MessageToNSQ::FIN(self.id))
                 .await
@@ -188,6 +187,9 @@ impl Drop for NSQMessage {
     fn drop(&mut self) {
         if !self.consumed {
             if self.context.healthy.load(Ordering::SeqCst) {
+                // TODO: async is lazy by default, hence this will not be executed:
+                // need to research about async-drop
+                #[allow(clippy::let_underscore_future)]
                 let _ =
                     self.context.to_connection_tx_ref.send(MessageToNSQ::REQ(
                         self.id,
@@ -900,7 +902,8 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
                 state.shared.healthy.store(false, Ordering::SeqCst);
                 state.shared.current_ready.store(0, Ordering::SeqCst);
 
-                let _ = state.from_connection_tx.send(NSQEvent::Unhealthy());
+                let _ =
+                    state.from_connection_tx.send(NSQEvent::Unhealthy()).await;
 
                 if let Some(error) = generic.downcast_ref::<tokio::io::Error>()
                 {
