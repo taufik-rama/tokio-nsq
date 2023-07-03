@@ -12,6 +12,7 @@ use ::std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
 use ::std::sync::Arc;
 use ::std::task::Poll;
 use ::std::time::Duration;
+use ::std::time::Instant;
 use ::thiserror::Error;
 use ::tokio::io::AsyncRead;
 use ::tokio::io::AsyncReadExt;
@@ -887,6 +888,10 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
     Ok(())
 }
 
+/// Pools the `run_connection` every few interval, with backoff.
+///
+/// When a new NSQ channel client is created, it will need to maintain an open TCP connection with the NSQ server. This
+/// maintains that connection.
 async fn run_connection_supervisor(mut state: NSQDConnectionState) {
     let mut backoff = backoff::ExponentialBackoff {
         max_interval: state.config.shared.backoff_max_wait,
@@ -894,60 +899,45 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
     };
 
     loop {
-        match run_connection(&mut state).await {
-            Err(generic) => {
-                state.shared.healthy.store(false, Ordering::SeqCst);
-                state.shared.current_ready.store(0, Ordering::SeqCst);
+        let now = Instant::now();
 
-                let _ =
-                    state.from_connection_tx.send(NSQEvent::Unhealthy()).await;
-
-                if let Some(error) = generic.downcast_ref::<tokio::io::Error>()
-                {
-                    error!("tokio io error: {}", error);
-                } else if let Some(error) =
-                    generic.downcast_ref::<serde_json::Error>()
-                {
-                    error!("serde json error: {}", error);
-
-                    return;
-                } else {
-                    error!("unknown error {}", generic);
-
-                    return;
-                }
-            }
-            _ => {
+        // The actual connection logic
+        if let Err(generic) = run_connection(&mut state).await {
+            state.shared.healthy.store(false, Ordering::SeqCst);
+            state.shared.current_ready.store(0, Ordering::SeqCst);
+            let _ = state.from_connection_tx.send(NSQEvent::Unhealthy()).await;
+            if let Some(error) = generic.downcast_ref::<tokio::io::Error>() {
+                error!("tokio io error: {}", error);
+            } else if let Some(error) =
+                generic.downcast_ref::<serde_json::Error>()
+            {
+                error!("serde json error: {}", error);
+                return;
+            } else {
+                error!("unknown error {}", generic);
                 return;
             }
+        } else {
+            return;
         }
 
-        let mut drained: u64 = 0;
-
-        while state
-            .to_connection_rx
-            .recv()
-            .now_or_never()
-            .and_then(|x| x)
-            .is_some()
-        {
-            drained += 1;
-        }
-
+        let drained =
+            std::iter::from_fn(|| state.to_connection_rx.recv().now_or_never())
+                .count();
         if drained != 0 {
             warn!("drained {} messages", drained);
         }
 
-        if let Some(sleep_for) = backoff.next_backoff() {
-            info!(
-                "run_connection_supervisor sleeping for: {}",
-                sleep_for.as_secs()
-            );
-            tokio::time::sleep(sleep_for).await;
-        } else {
+        if now.elapsed() >= state.config.shared.backoff_healthy_after {
             info!("run_connection_supervisor resetting backoff");
             backoff.reset();
         }
+        let sleep_for = backoff.next_backoff().unwrap();
+        info!(
+            "run_connection_supervisor sleeping for: {}",
+            sleep_for.as_secs()
+        );
+        tokio::time::sleep(sleep_for).await;
     }
 }
 
