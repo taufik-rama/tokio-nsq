@@ -67,7 +67,7 @@ impl NSQProducer {
 
     /// Queue a PUB message to be asynchronously sent
     pub async fn publish(
-        &mut self,
+        &self,
         topic: &Arc<NSQTopic>,
         value: Vec<u8>,
     ) -> Result<(), Error> {
@@ -78,7 +78,7 @@ impl NSQProducer {
 
     /// Queue a DPUB message to be asynchronously sent
     pub async fn publish_deferred(
-        &mut self,
+        &self,
         topic: &Arc<NSQTopic>,
         value: Vec<u8>,
         delay_milliseconds: u32,
@@ -94,7 +94,7 @@ impl NSQProducer {
 
     /// Queue an MPUB message to be asynchronously sent
     pub async fn publish_multiple(
-        &mut self,
+        &self,
         topic: &Arc<NSQTopic>,
         value: Vec<Vec<u8>>,
     ) -> Result<(), Error> {
