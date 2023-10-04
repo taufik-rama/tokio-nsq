@@ -170,15 +170,16 @@ impl NSQMessage {
     }
 
     /// Tells NSQ daemon to reset the timeout for this message.
-    pub async fn touch(&self) {
+    pub async fn touch(&self) -> Result<(), String> {
         if self.context.healthy.load(Ordering::SeqCst) {
             let _ = self
                 .context
                 .to_connection_tx_ref
                 .send(MessageToNSQ::TOUCH(self.id))
                 .await;
+            Ok(())
         } else {
-            warn!("touch unhealthy");
+            Err("touch unhealthy".into())
         }
     }
 }
@@ -1110,7 +1111,7 @@ where
         cx: &mut std::task::Context,
         buf: &mut ReadBuf,
     ) -> Poll<Result<(), std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if Pin::new(&mut me.inner).poll_read(cx, buf).is_ready() {
             me.read_delay = None;
             return Poll::Ready(Ok(()));
@@ -1143,7 +1144,7 @@ where
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if let Poll::Ready(n) = Pin::new(&mut me.inner).poll_write(cx, buf) {
             me.write_delay = None;
             return Poll::Ready(n);
@@ -1170,7 +1171,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if Pin::new(&mut me.inner).poll_flush(cx).is_ready() {
             me.write_delay = None;
             return Poll::Ready(Ok(()));
@@ -1197,7 +1198,7 @@ where
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        let mut me = Pin::into_inner(self);
+        let me = Pin::into_inner(self);
         if Pin::new(&mut me.inner).poll_shutdown(cx).is_ready() {
             me.write_delay = None;
             return Poll::Ready(Ok(()));
