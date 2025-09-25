@@ -188,7 +188,7 @@ struct LookupResponseProducer {
 
 #[derive(serde::Deserialize)]
 struct LookupResponse {
-    producers: Vec<LookupResponseProducer>,
+    producers: Option<Vec<LookupResponseProducer>>,
 }
 
 fn remove_old_connections(
@@ -236,7 +236,7 @@ async fn lookup(
     {
         let mut guard = clients_ref.write().unwrap();
 
-        for producer in lookup_response.producers.iter() {
+        for producer in lookup_response.producers.unwrap_or_default().iter() {
             let address = producer.broadcast_address.clone()
                 + ":"
                 + &producer.tcp_port.to_string();
