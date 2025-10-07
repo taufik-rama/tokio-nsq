@@ -674,8 +674,12 @@ fn read_to_dyn<S: Send + AsyncRead + std::marker::Unpin + 'static>(
 }
 
 async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
-    let stream =
-        tokio::net::TcpStream::connect(state.config.address.clone()).await?;
+    let stream = tokio::net::TcpStream::connect(state.config.address.clone())
+        .await
+        .map_err(|err| {
+            println!("WARN: connection not healthy (E0): {err}");
+            err
+        })?;
 
     let mut stream = TimeoutStream::new(stream);
     if let Some(timeout) = state.config.shared.write_timeout {
@@ -715,25 +719,60 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
         user_agent,
     };
 
-    let serialized = serde_json::to_string(&identify_body)?;
+    let serialized = serde_json::to_string(&identify_body).map_err(|err| {
+        println!("WARN: connection not healthy (E1): {err}");
+        err
+    })?;
 
-    let count = u32::try_from(serialized.len())?.to_be_bytes();
+    let count = u32::try_from(serialized.len())
+        .map_err(|err| {
+            println!("WARN: connection not healthy (E2): {err}");
+            err
+        })?
+        .to_be_bytes();
 
-    stream.write_all(b"  V2").await?;
-    stream.write_all(b"IDENTIFY\n").await?;
-    stream.write_all(&count).await?;
-    stream.write_all(serialized.as_bytes()).await?;
-    stream.flush().await?;
+    stream.write_all(b"  V2").await.map_err(|err| {
+        println!("WARN: connection not healthy (E3): {err}");
+        err
+    })?;
+    stream.write_all(b"IDENTIFY\n").await.map_err(|err| {
+        println!("WARN: connection not healthy (E4): {err}");
+        err
+    })?;
+    stream.write_all(&count).await.map_err(|err| {
+        println!("WARN: connection not healthy (E5): {err}");
+        err
+    })?;
+    stream
+        .write_all(serialized.as_bytes())
+        .await
+        .map_err(|err| {
+            println!("WARN: connection not healthy (E6): {err}");
+            err
+        })?;
+    stream.flush().await.map_err(|err| {
+        println!("WARN: connection not healthy (E7): {err}");
+        err
+    })?;
 
-    let settings: IdentifyResponse = match read_frame_data(&mut stream).await? {
-        Frame::Response(body) => serde_json::from_slice(&body)?,
-        _ => {
-            return Err(Error::from(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "feature negotiation failed",
-            )));
-        }
-    };
+    let settings: IdentifyResponse =
+        match read_frame_data(&mut stream).await.map_err(|err| {
+            println!("WARN: connection not healthy (E8): {err}");
+            err
+        })? {
+            Frame::Response(body) => {
+                serde_json::from_slice(&body).map_err(|err| {
+                    println!("WARN: connection not healthy (E9): {err}");
+                    err
+                })?
+            }
+            _ => {
+                return Err(Error::from(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "feature negotiation failed",
+                )));
+            }
+        };
 
     state
         .shared
@@ -775,11 +814,17 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
         // Turn stream back into TcpStream as rustls does buffering itself
         let stream = stream.into_inner().into_inner();
 
-        let stream = config.connect(dnsname, stream).await?;
+        let stream = config.connect(dnsname, stream).await.map_err(|err| {
+            println!("WARN: connection not healthy (E10): {err}");
+            err
+        })?;
 
         let (mut stream_rx, stream_tx) = tokio::io::split(stream);
 
-        match read_frame_data(&mut stream_rx).await? {
+        match read_frame_data(&mut stream_rx).await.map_err(|err| {
+            println!("WARN: connection not healthy (E11): {err}");
+            err
+        })? {
             Frame::Response(body) => {
                 if body != b"OK" {
                     return Err(Error::from(std::io::Error::new(
@@ -816,7 +861,10 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
                 tokio::io::BufReader::new(stream_rx),
             ));
 
-            match read_frame_data(&mut stream_rx).await? {
+            match read_frame_data(&mut stream_rx).await.map_err(|err| {
+                println!("WARN: connection not healthy (E12): {err}");
+                err
+            })? {
                 Frame::Response(body) => {
                     if body != b"OK" {
                         return Err(Error::from(std::io::Error::new(
@@ -845,7 +893,10 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
             let mut stream_rx = NSQSnappyInflate::new(stream_rx);
             let stream_tx = NSQSnappyDeflate::new(stream_tx);
 
-            match read_frame_data(&mut stream_rx).await? {
+            match read_frame_data(&mut stream_rx).await.map_err(|err| {
+                println!("WARN: connection not healthy (E13): {err}");
+                err
+            })? {
                 Frame::Response(body) => {
                     if body != b"OK" {
                         return Err(Error::from(std::io::Error::new(
@@ -868,10 +919,21 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
         };
 
     if let Some(credentials) = &state.config.shared.credentials {
-        write_auth(&mut stream_tx, credentials).await?;
-        stream_tx.flush().await?;
+        write_auth(&mut stream_tx, credentials)
+            .await
+            .map_err(|err| {
+                println!("WARN: connection not healthy (E14): {err}");
+                err
+            })?;
+        stream_tx.flush().await.map_err(|err| {
+            println!("WARN: connection not healthy (E15): {err}");
+            err
+        })?;
 
-        match read_frame_data(&mut stream_rx).await? {
+        match read_frame_data(&mut stream_rx).await.map_err(|err| {
+            println!("WARN: connection not healthy (E16): {err}");
+            err
+        })? {
             Frame::Response(_body) => {}
             _ => {
                 return Err(Error::from(std::io::Error::new(
@@ -884,7 +946,12 @@ async fn run_connection(state: &mut NSQDConnectionState) -> Result<(), Error> {
 
     info!("handshake completed");
 
-    run_generic(state, stream_rx, stream_tx).await?;
+    run_generic(state, stream_rx, stream_tx)
+        .await
+        .map_err(|err| {
+            println!("WARN: connection not healthy (E17): {err}");
+            err
+        })?;
 
     Ok(())
 }
@@ -904,6 +971,7 @@ async fn run_connection_supervisor(mut state: NSQDConnectionState) {
 
         // The actual connection logic
         if let Err(generic) = run_connection(&mut state).await {
+            println!("WARN: connection not healthy (E0/0): {generic}");
             state.shared.healthy.store(false, Ordering::SeqCst);
             state.shared.current_ready.store(0, Ordering::SeqCst);
             let _ = state.from_connection_tx.send(NSQEvent::Unhealthy()).await;
